@@ -3,6 +3,7 @@ from sentence_transformers import SentenceTransformer
 from qdrant_client import QdrantClient
 
 from src.generation.answer_generator import generate_answer
+from src.verification.citation_validator import validate_citations
 
 import time
 
@@ -71,6 +72,7 @@ if __name__ == "__main__":
 
     print("\nGenerating answer with Gemini...\n")
     answer = generate_answer(question, retrieved_chunks)
+    verification = validate_citations(answer, retrieved_chunks)
 
     generation_time = time.perf_counter() - start
 
@@ -86,3 +88,24 @@ if __name__ == "__main__":
         f"Total time: "
         f"{retrieval_time + generation_time:.2f} seconds"
     )
+
+    print("\n" + "=" * 65)
+    print("CITATION VERIFICATION REPORT")
+    print("=" * 65)
+
+    print(f"Total citations: {verification['total_citations']}")
+    print(f"Valid citations: {len(verification['valid_citations'])}")
+    print(f"Invalid citations: {len(verification['invalid_citations'])}")
+
+    if verification["all_valid"]:
+        print("\nCitation status: ALL CITATIONS VALID")
+    else:
+        print("\nCitation status: VERIFICATION FAILED")
+
+    if verification["invalid_citations"]:
+        print("\nInvalid citations:")
+
+        for document, page in verification["invalid_citations"]:
+            print(f"- {document}, page {page}")
+
+    print("=" * 65)
