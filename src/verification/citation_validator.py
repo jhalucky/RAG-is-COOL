@@ -1,6 +1,5 @@
 import re
 
-from torch import chunk
 
 def validate_citations(answer: str, chunks: list[dict]) -> dict:
     """
@@ -9,21 +8,18 @@ def validate_citations(answer: str, chunks: list[dict]) -> dict:
 
     citation_pattern = r"\[([^,\]]+),\s*page\s+(\d+)\]"
 
-    citations = re.findall[
+    citations = re.findall(
         citation_pattern,
         answer,
-        flags=re.IGNORECASE
-    ]
+        flags=re.IGNORECASE,
+    )
 
     # Build the set of valid document page combinations.
-
     valid_sources = {
         (
-            str(chunk.get("document_name","")).strip(),
-            str(chunk.get("page_number","")).strip()
-
+            str(chunk.get("document_name", "")).strip(),
+            str(chunk.get("page_number", "")).strip(),
         )
-
         for chunk in chunks
     }
 
@@ -34,5 +30,13 @@ def validate_citations(answer: str, chunks: list[dict]) -> dict:
         citation = (document.strip(), page.strip())
 
         if citation in valid_sources:
-            
-    
+            valid_citations.append(citation)
+        else:
+            invalid_citations.append(citation)
+
+    return {
+        "total_citations": len(citations),
+        "valid_citations": valid_citations,
+        "invalid_citations": invalid_citations,
+        "all_valid": len(citations) > 0 and len(invalid_citations) == 0,
+    }
