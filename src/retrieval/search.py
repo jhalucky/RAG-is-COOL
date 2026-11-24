@@ -98,7 +98,7 @@ if __name__ == "__main__":
     print(f"Generation time: {generation_time:.2f} seconds")
     print(
         f"Total time: "
-        f"{retrieval_time + generation_time:.2f} seconds"
+        f"{retrieval_time + generation_time + semantic_time:.2f} seconds"
     )
 
     print("\n" + "=" * 65)
