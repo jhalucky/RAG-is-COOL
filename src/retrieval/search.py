@@ -70,83 +70,160 @@ if __name__ == "__main__":
     print("\nSearching research papers...\n")
 
     # Import locally to avoid circular imports
+    
     from src.retrieval.hybrid_search import HybridSearch
+    from src.retrieval.reranker import NeuralReranker
 
+    # Initialize hybrid retrieval
     hybrid_search = HybridSearch(dense_search_fn=search)
 
-    retrieved_chunks = hybrid_search.search(
+    # Step 1: Retrieve 10 candidates using Dense + BM25 + RRF
+    retrieval_start = time.perf_counter()
+
+    candidate_chunks = hybrid_search.search(
         question,
-        top_k=5,
+        top_k=10,
         retrieval_k=10
     )
 
-    retrieval_time = time.perf_counter() - start
-    print(f"\nRetrieval time: {retrieval_time:.2f} seconds")
+    retrieval_time = time.perf_counter() - retrieval_start
 
+    # Step 2: Rerank candidates using BGE Cross-Encoder
+    reranker = NeuralReranker()
+
+    rerank_start = time.perf_counter()
+
+    retrieved_chunks = reranker.rerank(
+        query=question,
+        candidates=candidate_chunks,
+        top_k=5
+    )
+
+    print("\nRERANKED RESULTS")
+    print("=" * 70)
+
+    for rank, chunk in enumerate(retrieved_chunks, start=1):
+        print(f"\nRank: {rank}")
+        print(f"Document: {chunk['document_name']}")
+        print(f"Page: {chunk['page_number']}")
+        print(f"Rerank Score: {chunk['rerank_score']:.4f}")
+        print(f"Text: {chunk['text'][:300]}")
+        print("-" * 70)
+
+    rerank_time = time.perf_counter() - rerank_start
+
+    print(f"\nHybrid retrieval time: {retrieval_time:.2f} seconds")
+    print(f"Reranking time: {rerank_time:.2f} seconds")
+
+
+    
     # Measure generation time
-    start = time.perf_counter()
+    generation_start = time.perf_counter()
 
     print("\nGenerating answer with Gemini...\n")
-    answer = generate_answer(question, retrieved_chunks)
-    
 
-    generation_time = time.perf_counter() - start
-
-    verification = validate_citations(answer, retrieved_chunks)
-
-    print("\nVerifying claims against research evidence...\n")
-
-    semantic_start = time.perf_counter()
-    semantic_error = None
+    answer = None
+    generation_error = None
 
     try:
-        semantic_report = verify_claims(answer, retrieved_chunks)
+        answer = generate_answer(question, retrieved_chunks)
 
     except APIError as error:
-        semantic_error = str(error)
-        semantic_report = None
+        generation_error = str(error)
 
-        print("\nSemantic verification unavailable.")
-        print(f"Reason: {semantic_error}")
+        print("\nAnswer generation unavailable.")
+        print(f"Reason: {generation_error}")
 
-    semantic_time = time.perf_counter() - semantic_start
+    generation_time = time.perf_counter() - generation_start
 
+    # Initialize verification reports
+    verification = None
+    semantic_report = None
+    semantic_time = 0.0
+
+    # Run verification only if generation succeeds
+    if answer is not None:
+
+        verification = validate_citations(
+            answer,
+            retrieved_chunks
+        )
+
+        print("\nVerifying claims against research evidence...\n")
+
+        semantic_start = time.perf_counter()
+
+        try:
+            semantic_report = verify_claims(
+                answer,
+                retrieved_chunks
+            )
+
+        except APIError as error:
+            print("\nSemantic verification unavailable.")
+            print(f"Reason: {error}")
+
+        semantic_time = time.perf_counter() - semantic_start
+
+    # Final research answer
     print("\n" + "=" * 65)
     print("FINAL RESEARCH ANSWER")
     print("=" * 65)
-    print(answer)
+
+    if answer is not None:
+        print(answer)
+    else:
+        print("Answer generation failed. Retrieved passages are available above.")
+
     print("=" * 65)
 
-    print(f"\nRetrieval time: {retrieval_time:.2f} seconds")
+    # Performance metrics
+    print(f"\nHybrid retrieval time: {retrieval_time:.2f} seconds")
+    print(f"Reranking time: {rerank_time:.2f} seconds")
     print(f"Generation time: {generation_time:.2f} seconds")
-    print(
-        f"Total time: "
-        f"{retrieval_time + generation_time + semantic_time:.2f} seconds"
+    print(f"Semantic verification time: {semantic_time:.2f} seconds")
+
+    total_time = (
+        retrieval_time
+        + rerank_time
+        + generation_time
+        + semantic_time
     )
 
+    print(f"Total pipeline time: {total_time:.2f} seconds")
+
+    # Citation verification report
     print("\n" + "=" * 65)
     print("CITATION VERIFICATION REPORT")
     print("=" * 65)
 
-    print(f"Total citations: {verification['total_citations']}")
-    print(f"Valid citations: {len(verification['valid_citations'])}")
-    print(f"Invalid citations: {len(verification['invalid_citations'])}")
+    if verification is not None:
 
-    if verification["total_citations"] == 0:
-        print("\nCitation status: NO CITATIONS FOUND")
-    elif verification["all_valid"]:
-        print("\nCitation status: ALL CITATIONS VALID")
+        print(f"Total citations: {verification['total_citations']}")
+        print(f"Valid citations: {len(verification['valid_citations'])}")
+        print(f"Invalid citations: {len(verification['invalid_citations'])}")
+
+        if verification["total_citations"] == 0:
+            print("\nCitation status: NO CITATIONS FOUND")
+
+        elif verification["all_valid"]:
+            print("\nCitation status: ALL CITATIONS VALID")
+
+        else:
+            print("\nCitation status: INVALID CITATIONS FOUND")
+
+        if verification["invalid_citations"]:
+            print("\nInvalid citations:")
+
+            for document, page in verification["invalid_citations"]:
+                print(f"- {document}, page {page}")
+
     else:
-        print("\nCitation status: INVALID CITATIONS FOUND")
-
-    if verification["invalid_citations"]:
-        print("\nInvalid citations:")
-
-        for document, page in verification["invalid_citations"]:
-            print(f"- {document}, page {page}")
+        print("Citation verification skipped: no generated answer.")
 
     print("=" * 65)
 
+    # Semantic verification report
     print("\n" + "=" * 65)
     print("SEMANTIC VERIFICATION REPORT")
     print("=" * 65)
@@ -158,9 +235,14 @@ if __name__ == "__main__":
     )
 
     if semantic_report is not None:
+
         print(f"Total claims: {semantic_report.get('total_claims', 0)}")
+
+    elif answer is None:
+        print("Semantic verification skipped: no generated answer.")
+
     else:
-        print("Total claims: Not verified (API unavailable)")
+        print("Semantic verification unavailable.")
 
     statuses = [
         "SUPPORTED",
@@ -175,21 +257,27 @@ if __name__ == "__main__":
             1 for result in results
             if result.get("status", "").upper() == status
         )
+
         print(f"{status.replace('_', ' ').title()}: {count}")
 
-    print("\nIndividual claim results:")
+    if semantic_report is not None:
 
-    for index, result in enumerate(results, start=1):
-        print(f"\nClaim {index}: {result.get('claim', 'Unknown')}")
-        print(
-            f"Source: {result.get('document', 'Unknown')}, "
-            f"Page {result.get('page', 'Unknown')}"
-        )
-        print(f"Status: {result.get('status', 'Unknown')}")
-        print(
-            f"Explanation: "
-            f"{result.get('explanation', 'No explanation provided.')}"
-        )
+        print("\nIndividual claim results:")
 
-    print(f"\nSemantic verification time: {semantic_time:.2f} seconds")
+        for index, result in enumerate(results, start=1):
+
+            print(f"\nClaim {index}: {result.get('claim', 'Unknown')}")
+
+            print(
+                f"Source: {result.get('document', 'Unknown')}, "
+                f"Page {result.get('page', 'Unknown')}"
+            )
+
+            print(f"Status: {result.get('status', 'Unknown')}")
+
+            print(
+                f"Explanation: "
+                f"{result.get('explanation', 'No explanation provided.')}"
+            )
+
     print("=" * 65)
