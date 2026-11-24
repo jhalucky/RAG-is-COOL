@@ -1,4 +1,4 @@
-from src.retrieval.search import search as dense_search
+
 from src.retrieval.bm25_search import BM25Search
 
 RRF_K = 60
@@ -51,12 +51,13 @@ def reciprocal_rank_fusion(
 
 
 class HybridSearch:
-    def __init__(self):
+    def __init__(self, dense_search_fn):
         print("Initiating hybrid retrieval...")
 
+        self.dense_search = dense_search_fn
         self.bm25_search = BM25Search()
 
-        print("Hybrid retrieval intialized successfully.")
+        print("Hybrid retrieval initialized successfully.")
 
     def search(
         self,
@@ -66,13 +67,15 @@ class HybridSearch:
     ) -> list[dict]:
         "Retrieve and fuse dense and BM25 results."
 
-        print("\nRunning BM25 retrieval...")
-        bm25_results = self.bm25_search.search(
+        
+        print("\nRunning dense retrieval...")
+        dense_results = self.dense_search(
             query,
             top_k=retrieval_k
         )
 
-        dense_results = dense_search(
+        print("\nRunning BM25 retrieval...")
+        bm25_results = self.bm25_search.search(
             query,
             top_k=retrieval_k
         )
@@ -89,20 +92,24 @@ class HybridSearch:
 
 
 if __name__ == "__main__":
-    hybrid_search = HybridSearch()
+    from src.retrieval.search import search as dense_search
+
+    hybrid_search = HybridSearch(dense_search_fn=dense_search)
 
     query = input("\nEnter your research question: ")
+
     results = hybrid_search.search(
-            query,
-            top_k=5,
-            retrieval_k=10
-        )
+        query,
+        top_k=5,
+        retrieval_k=10
+    )
+
+    # Keep your existing results-printing loop.
 
     print("\nHYBRID SEARCH RESULTS")
     print("="*70)
 
     for rank, chunk in enumerate(results, start=1):
-         print(f"\nRank: {rank}")
          print(f"\nRank: {rank}")
          print(f"Document: {chunk['document_name']}")
          print(f"Page: {chunk['page_number']}")

@@ -1,10 +1,12 @@
-
 from sentence_transformers import SentenceTransformer
 from qdrant_client import QdrantClient
+
+from google.genai.errors import APIError
 
 from src.generation.answer_generator import generate_answer
 from src.verification.citation_validator import validate_citations
 from src.verification.semantic_verifier import verify_claims
+
 
 import time
 
@@ -66,7 +68,17 @@ if __name__ == "__main__":
     start = time.perf_counter()
 
     print("\nSearching research papers...\n")
-    retrieved_chunks = search(question, top_k=5)
+
+    # Import locally to avoid circular imports
+    from src.retrieval.hybrid_search import HybridSearch
+
+    hybrid_search = HybridSearch(dense_search_fn=search)
+
+    retrieved_chunks = hybrid_search.search(
+        question,
+        top_k=5,
+        retrieval_k=10
+    )
 
     retrieval_time = time.perf_counter() - start
     print(f"\nRetrieval time: {retrieval_time:.2f} seconds")
@@ -85,7 +97,18 @@ if __name__ == "__main__":
     print("\nVerifying claims against research evidence...\n")
 
     semantic_start = time.perf_counter()
-    semantic_report = verify_claims(answer, retrieved_chunks)
+    semantic_error = None
+
+    try:
+        semantic_report = verify_claims(answer, retrieved_chunks)
+
+    except APIError as error:
+        semantic_error = str(error)
+        semantic_report = None
+
+        print("\nSemantic verification unavailable.")
+        print(f"Reason: {semantic_error}")
+
     semantic_time = time.perf_counter() - semantic_start
 
     print("\n" + "=" * 65)
@@ -128,9 +151,16 @@ if __name__ == "__main__":
     print("SEMANTIC VERIFICATION REPORT")
     print("=" * 65)
 
-    results = semantic_report.get("results", [])
+    results = (
+        semantic_report.get("results", [])
+        if semantic_report is not None
+        else []
+    )
 
-    print(f"Total claims: {semantic_report.get('total_claims', 0)}")
+    if semantic_report is not None:
+        print(f"Total claims: {semantic_report.get('total_claims', 0)}")
+    else:
+        print("Total claims: Not verified (API unavailable)")
 
     statuses = [
         "SUPPORTED",
