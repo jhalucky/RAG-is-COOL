@@ -24,7 +24,7 @@ def generate_answer(question: str, chunks: list[dict]) -> str:
 
     context = []
 
-    for i, chunk in enumerate(chunks[:3], start=1):
+    for i, chunk in enumerate(chunks[:5], start=1):
         document = chunk.get("document_name") or chunk.get(
             "document_id", "Unknown"
         )
@@ -41,9 +41,14 @@ You are a research assistant.
 Answer the user's question using ONLY the research passages.
 
 Requirements:
-- Give a clear, coherent answer of approximately 100-150 words.
-- Explain the main concept before discussing related techniques.
-- Include only information relevant to the question.
+- Answer the exact question asked.
+- Prioritize information directly relevant to the question.
+- If asked about limitations, weaknesses, or failure cases,
+  focus specifically on those aspects.
+- Do not introduce unrelated background information.
+- If the provided evidence does not discuss an aspect,
+  explicitly state that evidence is insufficient.
+- Do not invent limitations or unsupported conclusions.
 - Cite factual claims using [document_name, page number].
 - Use the exact document filename provided in the passages.
 - Never cite using Source numbers.

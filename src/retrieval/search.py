@@ -52,6 +52,9 @@ def search(query: str, top_k: int = 3):
             f"Score: {point.score:.4f}"
         )
 
+        print(f"Passage: {chunk['text'][:500]}")
+        print("-" * 65)
+
     return chunks
 
 
@@ -106,10 +109,12 @@ if __name__ == "__main__":
     print(f"Valid citations: {len(verification['valid_citations'])}")
     print(f"Invalid citations: {len(verification['invalid_citations'])}")
 
-    if verification["all_valid"]:
+    if verification["total_citations"] == 0:
+        print("\nCitation status: NO CITATIONS FOUND")
+    elif verification["all_valid"]:
         print("\nCitation status: ALL CITATIONS VALID")
     else:
-        print("\nCitation status: VERIFICATION FAILED")
+        print("\nCitation status: INVALID CITATIONS FOUND")
 
     if verification["invalid_citations"]:
         print("\nInvalid citations:")
