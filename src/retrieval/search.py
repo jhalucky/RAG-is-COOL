@@ -4,6 +4,7 @@ from qdrant_client import QdrantClient
 
 from src.generation.answer_generator import generate_answer
 from src.verification.citation_validator import validate_citations
+from src.verification.semantic_verifier import verify_claims
 
 import time
 
@@ -62,7 +63,7 @@ if __name__ == "__main__":
     start = time.perf_counter()
 
     print("\nSearching research papers...\n")
-    retrieved_chunks = search(question, top_k=3)
+    retrieved_chunks = search(question, top_k=5)
 
     retrieval_time = time.perf_counter() - start
     print(f"\nRetrieval time: {retrieval_time:.2f} seconds")
@@ -72,9 +73,17 @@ if __name__ == "__main__":
 
     print("\nGenerating answer with Gemini...\n")
     answer = generate_answer(question, retrieved_chunks)
-    verification = validate_citations(answer, retrieved_chunks)
+    
 
     generation_time = time.perf_counter() - start
+
+    verification = validate_citations(answer, retrieved_chunks)
+
+    print("\nVerifying claims against research evidence...\n")
+
+    semantic_start = time.perf_counter()
+    semantic_report = verify_claims(answer, retrieved_chunks)
+    semantic_time = time.perf_counter() - semantic_start
 
     print("\n" + "=" * 65)
     print("FINAL RESEARCH ANSWER")
@@ -108,4 +117,44 @@ if __name__ == "__main__":
         for document, page in verification["invalid_citations"]:
             print(f"- {document}, page {page}")
 
+    print("=" * 65)
+
+    print("\n" + "=" * 65)
+    print("SEMANTIC VERIFICATION REPORT")
+    print("=" * 65)
+
+    results = semantic_report.get("results", [])
+
+    print(f"Total claims: {semantic_report.get('total_claims', 0)}")
+
+    statuses = [
+        "SUPPORTED",
+        "CONTRADICTED",
+        "INSUFFICIENT",
+        "UNVERIFIED",
+        "SOURCE_NOT_RETRIEVED",
+    ]
+
+    for status in statuses:
+        count = sum(
+            1 for result in results
+            if result.get("status", "").upper() == status
+        )
+        print(f"{status.replace('_', ' ').title()}: {count}")
+
+    print("\nIndividual claim results:")
+
+    for index, result in enumerate(results, start=1):
+        print(f"\nClaim {index}: {result.get('claim', 'Unknown')}")
+        print(
+            f"Source: {result.get('document', 'Unknown')}, "
+            f"Page {result.get('page', 'Unknown')}"
+        )
+        print(f"Status: {result.get('status', 'Unknown')}")
+        print(
+            f"Explanation: "
+            f"{result.get('explanation', 'No explanation provided.')}"
+        )
+
+    print(f"\nSemantic verification time: {semantic_time:.2f} seconds")
     print("=" * 65)
