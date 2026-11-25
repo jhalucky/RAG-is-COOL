@@ -1,0 +1,39 @@
+
+[
+  {
+    "id": "q1",
+    "question": "What is Retrieval-Augmented Generation (RAG), and how does it work?",
+    "expected_documents": [
+      "rag.pdf"
+    ]
+  },
+  {
+    "id": "q2",
+    "question": "What are the major limitations of Retrieval-Augmented Generation?",
+    "expected_documents": [
+      "rag.pdf",
+      "self_rag.pdf"
+    ]
+  },
+  {
+    "id": "q3",
+    "question": "What is retrieval collapse, and why does it happen?",
+    "expected_documents": [
+      "rag.pdf"
+    ]
+  },
+  {
+    "id": "q4",
+    "question": "What is the lost-in-the-middle problem in language models?",
+    "expected_documents": [
+      "lost_in_the_middle.pdf"
+    ]
+  },
+  {
+    "id": "q5",
+    "question": "How does SELF-RAG improve the factuality and reliability of generated answers?",
+    "expected_documents": [
+      "self_rag.pdf"
+    ]
+  }
+]
