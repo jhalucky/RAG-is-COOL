@@ -34,17 +34,17 @@ def load_evaluation_questions() -> list[dict]:
     return questions
 
 
-def get_unique_documents(results: list[dict])-> list[str]:
+def get_unique_documents(results: list[dict]) -> list[str]:
+    """Return unique document names in retrieval ranking order."""
     documents = []
 
     for result in results:
-        document_name = result.get("documwnt_name")
+        name = result["document_name"]
 
-        if document_name and document_name not in documents:
-            documents.append(document_name)
+        if name not in documents:
+            documents.append(name)
 
     return documents
-
 
 def calculate_metrics(
         retrieved_documents: list[str],
