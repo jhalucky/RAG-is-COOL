@@ -3,6 +3,7 @@ import os
 import time
 
 from google.genai import types
+from google.genai.errors import APIError
 from dotenv import load_dotenv
 from google import genai
 
@@ -15,7 +16,6 @@ if not API_KEY:
     raise ValueError("GEMINI_API_KEY is missing from your .env file")
 
 client = genai.Client(api_key=API_KEY)
-
 
 
 def generate_answer(question: str, chunks: list[dict]) -> str:
@@ -66,16 +66,41 @@ QUESTION:
 
     print("\nGenerating research answer...\n")
 
-    response = client.models.generate_content(
-        model=MODEL,
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            thinking_config=types.ThinkingConfig(
-                thinking_level="LOW"
-            ),
-            max_output_tokens=1024,
-        ),
-    )
+    response = None
+    max_attempts = 3
+
+    for attempt in range(max_attempts):
+        try:
+            response = client.models.generate_content(
+                model=MODEL,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    thinking_config=types.ThinkingConfig(
+                        thinking_level="LOW"
+                    ),
+                    max_output_tokens=1024,
+                ),
+            )
+            break
+
+        except APIError as error:
+            # Retry only temporary service-unavailable errors.
+            if getattr(error, "code", None) != 503:
+                raise
+
+            if attempt == max_attempts - 1:
+                print("Gemini remained unavailable after all retries.")
+                raise
+
+            wait_time = 2 ** (attempt + 1)
+
+            print(
+                f"Gemini returned HTTP 503. "
+                f"Retrying in {wait_time} seconds "
+                f"(attempt {attempt + 2}/{max_attempts})..."
+            )
+
+            time.sleep(wait_time)
 
     total_time = time.perf_counter() - start_time
     answer = response.text or ""
@@ -88,7 +113,10 @@ QUESTION:
     print("\nGeneration metrics")
     print("------------------")
     print(f"Model: {MODEL}")
-    print(f"Finish reason: {candidate.finish_reason if candidate else 'None'}")
+    print(
+        f"Finish reason: "
+        f"{candidate.finish_reason if candidate else 'None'}"
+    )
     print(f"Generation time: {total_time:.2f}s")
     print(f"Answer length: {len(answer)} characters")
 
