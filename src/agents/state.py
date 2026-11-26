@@ -1,4 +1,6 @@
-from typing import TypedDict, NotRequired
+
+from typing import TypedDict, NotRequired, Any
+
 
 class ResearchState(TypedDict):
     """
@@ -8,15 +10,15 @@ class ResearchState(TypedDict):
     question: str
 
     research_plan: NotRequired[list[str]]
-    retrieved_chunks: NotRequired[list[dict]]
+    retrieved_chunks: NotRequired[list[dict[str, Any]]]
+
     answer: NotRequired[str]
-    citation_validation: NotRequired[str]
-    semantic_verification: NotRequired[dict]
+
+    citation_validation: NotRequired[dict[str, Any]]
+    semantic_verification: NotRequired[dict[str, Any]]
 
     verification_passed: NotRequired[bool]
     revision_count: NotRequired[int]
 
     errors: NotRequired[list[str]]
-    final_agent: NotRequired[str]
-
-
+    final_report: NotRequired[str]

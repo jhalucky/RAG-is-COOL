@@ -3,6 +3,8 @@ from src.retrieval.bm25_search import BM25Search
 from src.retrieval.hybrid_search import HybridSearch
 from src.retrieval.reranker import NeuralReranker
 
+from google.genai.errors import APIError
+
 from src.generation.answer_generator import generate_answer
 
 from src.verification.citation_validator import validate_citations
@@ -53,25 +55,42 @@ def retrieval_node(state: dict) -> dict:
         "retrieved_chunks": retrieved_chunks,
     }
 
+
 def generation_node(state: dict) -> dict:
     """
     Generate an evidence-grounded answer using Gemini.
+    Handle API failures without crashing the graph.
     """
     print("\n[Generation] Generating research answer...")
 
-    answer = generate_answer(
-        question=state["question"],
-        chunks=state.get("retrieved_chunks", []),
-    )
+    try:
+        answer = generate_answer(
+            question=state["question"],
+            chunks=state.get("retrieved_chunks", []),
+        )
 
-    return {
-        "answer": answer,
-    }
+        return {
+            "answer": answer,
+        }
+
+    except APIError as error:
+        message = f"Gemini API error: {error}"
+
+        print(f"\n[Generation] {message}")
+
+        errors = list(state.get("errors", []))
+        errors.append(message)
+
+        return {
+            "answer": "",
+            "errors": errors,
+        }
 
 
 def verification_node(state: dict) -> dict:
     """
-    Validate citations and semantically verify generated claims.
+    Validate citations and verify whether generated claims
+    are supported by retrieved evidence.
     """
     print("\n[Verification] Validating citations...")
 
@@ -82,53 +101,83 @@ def verification_node(state: dict) -> dict:
 
     print("[Verification] Checking semantic support...")
 
-    semantic_result = verify_claims(answer, chunks)
+    errors = list(state.get("errors", []))
 
-    semantic_results = semantic_result.get("results", [])
+    try:
+        semantic_result = verify_claims(answer, chunks)
 
-    semantic_passed = (
-        semantic_result.get("total_claims", 0) > 0
-        and all(
-            item.get("verdict") == "SUPPORTED"
-            for item in semantic_results
+        claims = semantic_result.get("claims", [])
+
+        semantic_passed = (
+            len(claims) > 0
+            and all(
+                claim.get("verdict") == "SUPPORTED"
+                for claim in claims
+            )
         )
-    )
 
-    verification_passed = (
-        citation_result.get("all_valid", False)
-        and semantic_passed
-    )
+        verification_passed = (
+            citation_result.get("all_valid", False)
+            and semantic_passed
+        )
 
-    print(
-        f"[Verification] Passed: {verification_passed}"
-    )
+    except APIError as error:
+        message = f"Semantic verification API error: {error}"
+        print(f"\n[Verification] {message}")
+
+        errors.append(message)
+
+        semantic_result = {
+            "claims": [],
+            "error": message,
+        }
+
+        verification_passed = False
 
     return {
         "citation_validation": citation_result,
         "semantic_verification": semantic_result,
         "verification_passed": verification_passed,
+        "errors": errors,
     }
+
 
 
 def final_report_node(state: dict) -> dict:
     """
-    Prepare the final research report.
+    Prepare the final research report, including failure status.
     """
     answer = state.get("answer", "")
+    errors = state.get("errors", [])
 
-    status = (
-        "Verified"
-        if state.get("verification_passed", False)
-        else "Verification requires review"
-    )
+    if not answer:
+        status = "Generation Failed"
+        report_content = (
+            "An answer could not be generated because the LLM "
+            "service was unavailable.\n\n"
+            f"Retrieved evidence passages: "
+            f"{len(state.get('retrieved_chunks', []))}\n\n"
+            "Please retry the research request later."
+        )
+    else:
+        status = (
+            "Verified"
+            if state.get("verification_passed", False)
+            else "Verification requires review"
+        )
+        report_content = answer
 
     final_report = (
         f"RESEARCH REPORT\n"
         f"{'=' * 60}\n\n"
         f"Question: {state['question']}\n\n"
         f"Status: {status}\n\n"
-        f"{answer}\n"
+        f"{report_content}\n"
     )
+
+    if errors:
+        final_report += "\nErrors:\n"
+        final_report += "\n".join(errors)
 
     return {
         "final_report": final_report,
