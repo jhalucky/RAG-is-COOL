@@ -5,6 +5,15 @@ from src.retrieval.reranker import NeuralReranker
 
 from google.genai.errors import APIError
 
+import json
+
+from google.genai import types
+from src.generation.answer_generator import (
+    client,
+    MODEL,
+    generate_answer,
+)
+
 from src.generation.answer_generator import generate_answer
 
 from src.verification.citation_validator import validate_citations
@@ -14,22 +23,102 @@ bm25_searcher = BM25Search()
 hybrid_searcher = HybridSearch(dense_search_fn=dense_search)
 reranker = NeuralReranker()
 
+
 def planner_node(state: dict) -> dict:
+    """
+    Decompose a research question into focused subquestions
+    using Gemini. Fall back to a deterministic plan if needed.
+    """
     question = state["question"]
 
-    research_plan = [
-        f"Find relevant research evidence for: {question}",
-        f"Identify key findings related to: {question}",
-        f"verify the findings against their original sources."
+    print("\n[Planner] Creating intelligent research plan...")
+
+    errors = list(state.get("errors", []))
+
+    fallback_plan = [
+        question,
+        f"What are the key concepts and background needed to answer: {question}",
+        f"What evidence and research findings support the answer to: {question}",
     ]
 
-    print("\n[Planner] Research plan created.")
+    prompt = f"""
+You are an expert academic research planner.
+
+Break the user's research question into 3 to 5 focused,
+independent research subquestions.
+
+Each subquestion should:
+- Investigate one specific aspect of the main question.
+- Be suitable for searching academic research papers.
+- Help build a comprehensive answer to the original question.
+- Avoid repeating another subquestion.
+
+Return ONLY valid JSON in this exact format:
+
+{{
+    "subquestions": [
+        "First research subquestion",
+        "Second research subquestion",
+        "Third research subquestion"
+    ]
+}}
+
+Research question:
+{question}
+"""
+
+    try:
+        response = client.models.generate_content(
+            response = client.models.generate_content(
+            model=MODEL,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                temperature=0.2,
+                max_output_tokens=1024,
+                response_mime_type="application/json",
+            ),
+        )
+        )
+
+        raw_response = response.text or ""
+
+        print("\n[Planner] Raw Gemini response:")
+        print(repr(raw_response))
+
+        result = json.loads(raw_response)
+        research_plan = result.get("subquestions", [])
+
+        if (
+            not isinstance(research_plan, list)
+            or not 3 <= len(research_plan) <= 5
+            or not all(
+                isinstance(item, str) and item.strip()
+                for item in research_plan
+            )
+        ):
+            raise ValueError("Planner returned an invalid research plan.")
+
+        research_plan = [item.strip() for item in research_plan]
+
+        print(f"[Planner] Generated {len(research_plan)} research subquestions.")
+
+    except Exception as error:
+        message = f"LLM planning failed; using fallback plan: {error}"
+        print(f"[Planner] {message}")
+
+        errors.append(message)
+        research_plan = fallback_plan
+
+    print("\nResearch Plan:")
+    for index, subquestion in enumerate(research_plan, start=1):
+        print(f"{index}. {subquestion}")
 
     return {
         "research_plan": research_plan,
         "revision_count": state.get("revision_count", 0),
-        "errors": state.get("errors", [])
+        "errors": errors,
     }
+
 
 def retrieval_node(state: dict) -> dict:
 
