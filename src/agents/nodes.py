@@ -69,18 +69,20 @@ Research question:
 
     try:
         response = client.models.generate_content(
-            response = client.models.generate_content(
             model=MODEL,
             contents=prompt,
             config=types.GenerateContentConfig(
                 temperature=0.2,
                 max_output_tokens=1024,
-                response_mime_type="application/json",
             ),
-        )
         )
 
         raw_response = response.text or ""
+
+        print("\n[Planner] Raw Gemini response:")
+        print(repr(raw_response))
+
+        result = json.loads(raw_response)
 
         print("\n[Planner] Raw Gemini response:")
         print(repr(raw_response))
