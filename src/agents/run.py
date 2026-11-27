@@ -9,6 +9,10 @@ def run_research_agent(question: str) -> dict:
     initial_state = {
         "question": question,
         "revision_count": 0,
+        "retrieval_attempts": 0,
+        "max_retrieval_attempts": 2,
+        "retrieved_chunks": [],
+        "retrieval_queries": [],
         "errors": [],
     }
 

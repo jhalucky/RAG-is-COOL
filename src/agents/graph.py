@@ -1,21 +1,57 @@
+
 from langgraph.graph import StateGraph, START, END
 
 from src.agents.state import ResearchState
+
 from src.agents.nodes import (
     planner_node,
     retrieval_node,
+    evidence_evaluation_node,
+    query_refinement_node,
     generation_node,
     verification_node,
-    final_report_node
+    final_report_node,
 )
 
 MAX_REVISIONS = 1
+MAX_RETRIEVAL_ATTEMPTS = 2
+
+
+def should_continue_retrieval(state: ResearchState) -> str:
+    """
+    Decide whether another retrieval attempt is necessary.
+    """
+
+    # Never loop on evaluator API failures.
+    if state.get("evidence_evaluation_failed", False):
+        return "generate"
+
+    # Evidence is sufficient.
+    if state.get("evidence_sufficient", False):
+        return "generate"
+
+    attempts = state.get("retrieval_attempts", 0)
+    max_attempts = state.get(
+        "max_retrieval_attempts",
+        MAX_RETRIEVAL_ATTEMPTS,
+    )
+
+    if attempts < max_attempts:
+        return "refine"
+
+    print("\n[Adaptive Retrieval] Maximum attempts reached.")
+
+    return "generate"
+
 
 def should_revise(state: ResearchState) -> str:
+
     errors = state.get("errors", [])
 
-    # Do not regenerate just because the verification API failed.
-    if any("Semantic verification API error" in error for error in errors):
+    if any(
+        "Semantic verification API error" in error
+        for error in errors
+    ):
         return "finish"
 
     if state.get("verification_passed", False):
@@ -27,12 +63,12 @@ def should_revise(state: ResearchState) -> str:
     return "finish"
 
 
-
 def revision_node(state: ResearchState) -> dict:
+
     revision_count = state.get("revision_count", 0) + 1
 
     print(
-        f"\n[Revision] Preparing revision"
+        f"\n[Revision] Preparing revision "
         f"{revision_count}/{MAX_REVISIONS}"
     )
 
@@ -42,37 +78,65 @@ def revision_node(state: ResearchState) -> dict:
 
 
 def after_generation(state: ResearchState) -> str:
-    """Route based on whether answer generation succeeded."""
+
     if state.get("answer"):
         return "verify"
 
     return "finish"
 
 
-
 def build_research_graph():
+
     workflow = StateGraph(ResearchState)
 
+    # Nodes
     workflow.add_node("planner", planner_node)
     workflow.add_node("retrieval", retrieval_node)
+
+    workflow.add_node(
+        "evidence_evaluation",
+        evidence_evaluation_node,
+    )
+
+    workflow.add_node(
+        "query_refinement",
+        query_refinement_node,
+    )
+
     workflow.add_node("generation", generation_node)
     workflow.add_node("verification", verification_node)
     workflow.add_node("revision", revision_node)
     workflow.add_node("final_report", final_report_node)
 
+    # Initial workflow
     workflow.add_edge(START, "planner")
     workflow.add_edge("planner", "retrieval")
-    workflow.add_edge("retrieval", "generation")
-    workflow.add_conditional_edges(
-    "generation",
-    after_generation,
-    {
-        "verify": "verification",
-        "finish": "final_report",
-    },
-)
 
-     # Conditional verification
+    # Adaptive retrieval
+    workflow.add_edge("retrieval", "evidence_evaluation")
+
+    workflow.add_conditional_edges(
+        "evidence_evaluation",
+        should_continue_retrieval,
+        {
+            "refine": "query_refinement",
+            "generate": "generation",
+        },
+    )
+
+    workflow.add_edge("query_refinement", "retrieval")
+
+    # Answer generation
+    workflow.add_conditional_edges(
+        "generation",
+        after_generation,
+        {
+            "verify": "verification",
+            "finish": "final_report",
+        },
+    )
+
+    # Answer verification and revision
     workflow.add_conditional_edges(
         "verification",
         should_revise,
@@ -82,7 +146,6 @@ def build_research_graph():
         },
     )
 
-    # Revision returns to generation
     workflow.add_edge("revision", "generation")
 
     workflow.add_edge("final_report", END)
@@ -91,7 +154,6 @@ def build_research_graph():
 
 
 research_graph = build_research_graph()
-
 
 
 if __name__ == "__main__":

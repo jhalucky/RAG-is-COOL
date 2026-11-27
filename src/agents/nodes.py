@@ -2,6 +2,8 @@ from src.retrieval.search import search as dense_search
 from src.retrieval.bm25_search import BM25Search
 from src.retrieval.hybrid_search import HybridSearch
 from src.retrieval.reranker import NeuralReranker
+from src.verification.evidence_sufficiency import evaluate_evidence
+
 
 from google.genai.errors import APIError
 
@@ -161,41 +163,55 @@ Research question:
 
 
 
+
 def retrieval_node(state: dict) -> dict:
     """
-    Retrieve evidence using every research subquestion,
-    merge duplicate passages, and rerank against the
-    original research question.
+    Perform multi-query retrieval and preserve evidence
+    collected across adaptive retrieval attempts.
     """
+
     question = state["question"]
-    research_plan = state.get("research_plan") or [question]
 
-    print("\n[Retrieval] Starting multi-query retrieval...")
-    print(f"[Retrieval] Research queries: {len(research_plan)}")
+    queries = (
+        state.get("retrieval_queries")
+        or state.get("research_plan")
+        or [question]
+    )
 
+    print("\n[Retrieval] Starting retrieval...")
+    print(f"[Retrieval] Queries: {len(queries)}")
+
+    # Preserve evidence from previous attempts.
     all_candidates = {}
 
-    for index, subquestion in enumerate(research_plan, start=1):
-        print(f"\n[Retrieval] Query {index}/{len(research_plan)}:")
-        print(subquestion)
+    for chunk in state.get("retrieved_chunks", []):
+        chunk_id = (
+            chunk.get("document_id") or chunk.get("document_name"),
+            chunk.get("page_number"),
+            chunk.get("chunk_index"),
+        )
+        all_candidates[chunk_id] = chunk
+
+    # Retrieve evidence for each query.
+    for index, query in enumerate(queries, start=1):
+
+        print(f"\n[Retrieval] Query {index}/{len(queries)}")
+        print(query)
 
         candidates = hybrid_searcher.search(
-            subquestion,
+            query,
             top_k=10,
-            retrieval_k=10
+            retrieval_k=10,
         )
 
-        print(
-            f"[Retrieval] Retrieved {len(candidates)} "
-            f"candidates."
-        )
+        print(f"[Retrieval] Candidates: {len(candidates)}")
 
         for candidate in candidates:
             chunk_id = (
                 candidate.get("document_id")
                 or candidate.get("document_name"),
                 candidate.get("page_number"),
-                candidate.get("chunk_index")
+                candidate.get("chunk_index"),
             )
 
             if chunk_id not in all_candidates:
@@ -204,28 +220,123 @@ def retrieval_node(state: dict) -> dict:
     merged_candidates = list(all_candidates.values())
 
     print(
-        f"\n[Retrieval] Total unique candidates: "
+        f"\n[Retrieval] Total unique evidence: "
         f"{len(merged_candidates)}"
     )
 
     if not merged_candidates:
-        return {"retrieved_chunks": []}
+        retrieved_chunks = []
+    else:
+        retrieved_chunks = reranker.rerank(
+            query=question,
+            candidates=merged_candidates,
+            top_k=5,
+        )
 
-    print("\n[Retrieval] Reranking combined evidence...")
+    attempt = state.get("retrieval_attempts", 0) + 1
 
-    retrieved_chunks = reranker.rerank(
-        query=question,
-        candidates=merged_candidates,
-        top_k=5
-    )
-
-    print(
-        f"[Retrieval] Final evidence passages: "
-        f"{len(retrieved_chunks)}"
-    )
+    print(f"[Retrieval] Attempt: {attempt}")
 
     return {
-        "retrieved_chunks": retrieved_chunks
+        "retrieved_chunks": retrieved_chunks,
+        "retrieval_attempts": attempt,
+    }
+
+
+
+def evidence_evaluation_node(state: dict) -> dict:
+    """
+    Evaluate whether the accumulated evidence sufficiently
+    covers the research question.
+    """
+
+    print("\n[Evidence Evaluation] Evaluating evidence quality...")
+
+    try:
+        result = evaluate_evidence(
+            question=state["question"],
+            research_plan=state.get("research_plan", []),
+            retrieved_chunks=state.get("retrieved_chunks", []),
+        )
+
+        print(
+            f"[Evidence Evaluation] Coverage: "
+            f"{result['coverage_score']:.2f}"
+        )
+
+        print(
+            f"[Evidence Evaluation] Sufficient: "
+            f"{result['sufficient']}"
+        )
+
+        print(
+            f"[Evidence Evaluation] Missing aspects: "
+            f"{result['missing_aspects']}"
+        )
+
+        return {
+            "evidence_evaluation": result,
+            "evidence_sufficient": result["sufficient"],
+            "evidence_evaluation_failed": False,
+        }
+
+    except Exception as error:
+        message = f"Evidence evaluation failed: {error}"
+
+        print(f"\n[Evidence Evaluation] {message}")
+
+        errors = list(state.get("errors", []))
+        errors.append(message)
+
+        return {
+            "evidence_sufficient": False,
+            "evidence_evaluation_failed": True,
+            "errors": errors,
+        }
+
+
+
+def query_refinement_node(state: dict) -> dict:
+    """
+    Prepare focused retrieval queries based on evidence gaps.
+    """
+
+    evaluation = state.get("evidence_evaluation", {})
+
+    suggested_queries = evaluation.get("suggested_queries", [])
+    missing_aspects = evaluation.get("missing_aspects", [])
+
+    # Prefer evaluator-generated queries.
+    refined_queries = suggested_queries or missing_aspects
+
+    # Remove empty queries and duplicates.
+    refined_queries = list(dict.fromkeys(
+        query.strip()
+        for query in refined_queries
+        if isinstance(query, str) and query.strip()
+    ))
+
+    # Safety fallback.
+    if not refined_queries:
+        refined_queries = [
+            f"Additional evidence about {aspect}"
+            for aspect in missing_aspects
+            if isinstance(aspect, str) and aspect.strip()
+        ]
+
+    if not refined_queries:
+        print(
+            "[Query Refinement] No useful additional queries. "
+            "Proceeding to generation."
+        )
+
+    print("\n[Query Refinement] New research queries:")
+
+    for index, query in enumerate(refined_queries, start=1):
+        print(f"{index}. {query}")
+
+    return {
+        "retrieval_queries": refined_queries,
     }
 
 
@@ -339,6 +450,25 @@ def final_report_node(state: dict) -> dict:
             else "Verification requires review"
         )
         report_content = answer
+
+
+    evaluation = state.get("evidence_evaluation", {})
+
+    if evaluation:
+        report_content += (
+            "\n\nEVIDENCE EVALUATION\n"
+            f"Coverage score: {evaluation.get('coverage_score', 0):.2f}\n"
+            f"Evidence sufficient: {evaluation.get('sufficient', False)}\n"
+            f"Reasoning: {evaluation.get('reasoning', '')}\n"
+        )
+
+        missing = evaluation.get("missing_aspects", [])
+
+        if missing:
+            report_content += "\nUnresolved evidence gaps:\n"
+            report_content += "\n".join(
+                f"- {aspect}" for aspect in missing
+            )
 
     final_report = (
         f"RESEARCH REPORT\n"
