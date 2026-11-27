@@ -122,18 +122,18 @@ Research question:
     }
 
 
+
 def retrieval_node(state: dict) -> dict:
-
+    """
+    Retrieve evidence using every research subquestion,
+    merge duplicate passages, and rerank against the
+    original research question.
+    """
     question = state["question"]
-
-    research_plan = state.get("research_plan", [question])
-
-    if not research_plan:
-        research_plan = [question]
-
+    research_plan = state.get("research_plan") or [question]
 
     print("\n[Retrieval] Starting multi-query retrieval...")
-    print(f"[Retrieval] Number of research queries: {len(research_plan)}")
+    print(f"[Retrieval] Research queries: {len(research_plan)}")
 
     all_candidates = {}
 
@@ -141,23 +141,23 @@ def retrieval_node(state: dict) -> dict:
         print(f"\n[Retrieval] Query {index}/{len(research_plan)}:")
         print(subquestion)
 
-    candidates = hybrid_searcher.search(
-        question,
-        top_k = 10,
-        retrieval_k=10
-    )
-
-    print(
-            f"[Retrieval] Retrieved {len(candidates)} "
-            f"candidates for query {index}."
+        candidates = hybrid_searcher.search(
+            subquestion,
+            top_k=10,
+            retrieval_k=10
         )
-    
-    for candidate in candidates:
+
+        print(
+            f"[Retrieval] Retrieved {len(candidates)} "
+            f"candidates."
+        )
+
+        for candidate in candidates:
             chunk_id = (
                 candidate.get("document_id")
                 or candidate.get("document_name"),
                 candidate.get("page_number"),
-                candidate.get("chunk_index"),
+                candidate.get("chunk_index")
             )
 
             if chunk_id not in all_candidates:
@@ -165,22 +165,20 @@ def retrieval_node(state: dict) -> dict:
 
     merged_candidates = list(all_candidates.values())
 
-    print("\n[Retrieval] Multi-query retrieval summary:")
-    print(f"Total unique candidates: {len(merged_candidates)}")
+    print(
+        f"\n[Retrieval] Total unique candidates: "
+        f"{len(merged_candidates)}"
+    )
 
     if not merged_candidates:
-        print("[Retrieval] No evidence passages found.")
-
-        return {
-            "retrieved_chunks": [],
-        }
+        return {"retrieved_chunks": []}
 
     print("\n[Retrieval] Reranking combined evidence...")
 
     retrieved_chunks = reranker.rerank(
         query=question,
         candidates=merged_candidates,
-        top_k=5,
+        top_k=5
     )
 
     print(
@@ -189,9 +187,8 @@ def retrieval_node(state: dict) -> dict:
     )
 
     return {
-        "retrieved_chunks": retrieved_chunks,
+        "retrieved_chunks": retrieved_chunks
     }
-
 
 
 def generation_node(state: dict) -> dict:
