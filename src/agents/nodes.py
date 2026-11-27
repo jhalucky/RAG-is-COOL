@@ -24,6 +24,44 @@ hybrid_searcher = HybridSearch(dense_search_fn=dense_search)
 reranker = NeuralReranker()
 
 
+
+def parse_planner_response(raw_response: str) -> list[str]:
+    """Parse and validate Gemini's research plan."""
+
+    if not raw_response or not raw_response.strip():
+        raise ValueError("Gemini returned an empty response.")
+
+    cleaned = raw_response.strip()
+
+    # Handle Markdown code fences.
+    if cleaned.startswith("```"):
+        cleaned = cleaned.split("\n", 1)[-1]
+        if cleaned.endswith("```"):
+            cleaned = cleaned[:-3].strip()
+
+        if cleaned.startswith("json"):
+            cleaned = cleaned[4:].strip()
+
+    result = json.loads(cleaned)
+
+    if not isinstance(result, dict):
+        raise ValueError("Planner response must be a JSON object.")
+
+    research_plan = result.get("subquestions")
+
+    if (
+        not isinstance(research_plan, list)
+        or not 3 <= len(research_plan) <= 5
+        or not all(
+            isinstance(item, str) and item.strip()
+            for item in research_plan
+        )
+    ):
+        raise ValueError("Invalid research subquestions.")
+
+    return [item.strip() for item in research_plan]
+
+
 def planner_node(state: dict) -> dict:
     """
     Decompose a research question into focused subquestions
@@ -72,9 +110,10 @@ Research question:
             model=MODEL,
             contents=prompt,
             config=types.GenerateContentConfig(
-                temperature=0.2,
-                max_output_tokens=1024,
-            ),
+            temperature=0.2,
+            max_output_tokens=1024,
+            response_mime_type="application/json",
+        ),
         )
 
         raw_response = response.text or ""
@@ -82,13 +121,12 @@ Research question:
         print("\n[Planner] Raw Gemini response:")
         print(repr(raw_response))
 
-        result = json.loads(raw_response)
+        research_plan = parse_planner_response(raw_response)
 
-        print("\n[Planner] Raw Gemini response:")
-        print(repr(raw_response))
-
-        result = json.loads(raw_response)
-        research_plan = result.get("subquestions", [])
+        print(
+            f"[Planner] Generated "
+            f"{len(research_plan)} research subquestions."
+        )
 
         if (
             not isinstance(research_plan, list)
