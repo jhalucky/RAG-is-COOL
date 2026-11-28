@@ -2,6 +2,8 @@
 import os
 import time
 
+import json
+
 from google.genai import types
 from google.genai.errors import APIError
 from dotenv import load_dotenv
@@ -18,7 +20,7 @@ if not API_KEY:
 client = genai.Client(api_key=API_KEY)
 
 
-def generate_answer(question: str, chunks: list[dict]) -> str:
+def generate_answer(question: str, chunks: list[dict], revision_feedback: dict | None = None) -> str:
     if not chunks:
         return "No relevant passages found."
 
@@ -61,6 +63,52 @@ RESEARCH PASSAGES:
 QUESTION:
 {question}
 """
+
+    if revision_feedback:
+        failed_claims = revision_feedback.get("failed_claims", [])
+
+        failed_claim_text = "\n".join(
+            (
+                f"- Claim: {item.get('claim', '')}\n"
+                f"  Verdict: {item.get('verdict', 'UNKNOWN')}\n"
+                f"  Reason: {item.get('reason', '')}"
+            )
+            for item in failed_claims
+        )
+
+        citation_results = json.dumps(
+            revision_feedback.get("citation_validation", {}),
+            indent=2,
+            ensure_ascii=False,
+            default=str,
+        )
+
+        revision_section = f"""
+
+REVISION MODE
+
+Previous answer:
+{revision_feedback.get('previous_answer', '')}
+
+Verification feedback:
+{failed_claim_text or "No individually unsupported claims were identified."}
+
+Citation validation results:
+{citation_results}
+
+Revision instructions:
+{revision_feedback.get('instruction', '')}
+
+Additional requirements:
+- Re-examine the original research passages.
+- Correct or remove claims that lack sufficient support.
+- Correct invalid citations using only the supplied passages.
+- Do not introduce new facts or sources.
+- Retain accurate and well-supported information.
+- Return the complete corrected answer, not just the changes.
+"""
+
+        prompt += revision_section
 
     start_time = time.perf_counter()
 

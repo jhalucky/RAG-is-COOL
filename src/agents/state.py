@@ -22,12 +22,18 @@ class ResearchState(TypedDict):
     evidence_evaluation_failed: NotRequired[bool]
     evidence_selection_stats: NotRequired[dict[str, Any]]
 
+
     # Generation
     answer: NotRequired[str]
+
 
     #compression
     compressed_chunks: NotRequired[list[dict[str, Any]]]
     compression_stats: NotRequired[dict[str, Any]]
+
+    #revision
+    revision_feedback: NotRequired[dict[str, Any]]
+
 
     # Verification
     citation_validation: NotRequired[dict[str, Any]]

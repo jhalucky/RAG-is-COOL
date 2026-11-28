@@ -74,18 +74,54 @@ def should_revise(state: ResearchState) -> str:
     return "finish"
 
 
+
+
 def revision_node(state: ResearchState) -> dict:
+    """Prepare evidence-based feedback for answer revision."""
 
     revision_count = state.get("revision_count", 0) + 1
+
+    semantic_result = state.get("semantic_verification", {})
+    claims = semantic_result.get("claims", [])
+
+    failed_claims = []
+
+    for claim in claims:
+        if claim.get("verdict") != "SUPPORTED":
+            failed_claims.append({
+                "claim": claim.get("claim", ""),
+                "verdict": claim.get("verdict", "UNKNOWN"),
+                "reason": (
+                    claim.get("reason")
+                    or claim.get("explanation")
+                    or claim.get("rationale")
+                    or "Insufficient evidence to support this claim."
+                ),
+            })
+
+    revision_feedback = {
+        "previous_answer": state.get("answer", ""),
+        "failed_claims": failed_claims,
+        "citation_validation": state.get("citation_validation", {}),
+        "instruction": (
+            "Revise the previous answer using only the supplied "
+            "research evidence. Correct or remove unsupported claims. "
+            "Fix citation errors. Do not invent citations or evidence. "
+            "Preserve claims that are already supported."
+        ),
+    }
 
     print(
         f"\n[Revision] Preparing revision "
         f"{revision_count}/{MAX_REVISIONS}"
     )
+    print(f"[Revision] Unsupported claims: {len(failed_claims)}")
 
     return {
-        "revision_count": revision_count
+        "revision_count": revision_count,
+        "revision_feedback": revision_feedback,
     }
+
 
 
 def after_generation(state: ResearchState) -> str:

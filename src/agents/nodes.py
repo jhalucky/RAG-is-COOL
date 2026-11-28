@@ -435,6 +435,7 @@ def generation_node(state: dict) -> dict:
         answer = generate_answer(
             question=state["question"],
             chunks=compressed_chunks,
+            revision_feedback=state.get("revision_feedback")
         )
 
         return {
