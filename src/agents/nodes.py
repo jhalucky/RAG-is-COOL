@@ -3,6 +3,7 @@ from src.retrieval.bm25_search import BM25Search
 from src.retrieval.hybrid_search import HybridSearch
 from src.retrieval.reranker import NeuralReranker
 from src.verification.evidence_sufficiency import evaluate_evidence
+from src.agents.api_errors import is_rate_limit_error
 
 
 from google.genai.errors import APIError
@@ -244,11 +245,9 @@ def retrieval_node(state: dict) -> dict:
 
 
 
+
 def evidence_evaluation_node(state: dict) -> dict:
-    """
-    Evaluate whether the accumulated evidence sufficiently
-    covers the research question.
-    """
+    """Evaluate retrieved evidence and handle API failures."""
 
     print("\n[Evidence Evaluation] Evaluating evidence quality...")
 
@@ -269,11 +268,6 @@ def evidence_evaluation_node(state: dict) -> dict:
             f"{result['sufficient']}"
         )
 
-        print(
-            f"[Evidence Evaluation] Missing aspects: "
-            f"{result['missing_aspects']}"
-        )
-
         return {
             "evidence_evaluation": result,
             "evidence_sufficient": result["sufficient"],
@@ -288,11 +282,24 @@ def evidence_evaluation_node(state: dict) -> dict:
         errors = list(state.get("errors", []))
         errors.append(message)
 
+        if is_rate_limit_error(error):
+            print(
+                "[Evidence Evaluation] Gemini quota/rate limit "
+                "reached. Stopping further LLM requests."
+            )
+
+            return {
+                "evidence_evaluation_failed": True,
+                "llm_unavailable": True,
+                "llm_error": str(error),
+                "errors": errors,
+            }
+
         return {
-            "evidence_sufficient": False,
             "evidence_evaluation_failed": True,
             "errors": errors,
         }
+
 
 
 
@@ -341,10 +348,8 @@ def query_refinement_node(state: dict) -> dict:
 
 
 def generation_node(state: dict) -> dict:
-    """
-    Generate an evidence-grounded answer using Gemini.
-    Handle API failures without crashing the graph.
-    """
+    """Generate an evidence-grounded answer using Gemini."""
+
     print("\n[Generation] Generating research answer...")
 
     try:
@@ -353,34 +358,34 @@ def generation_node(state: dict) -> dict:
             chunks=state.get("retrieved_chunks", []),
         )
 
-        return {
-            "answer": answer,
-        }
+        return {"answer": answer}
 
     except APIError as error:
         message = f"Gemini API error: {error}"
-
         print(f"\n[Generation] {message}")
 
         errors = list(state.get("errors", []))
         errors.append(message)
 
+        rate_limited = is_rate_limit_error(error)
+
         return {
             "answer": "",
             "errors": errors,
+            "llm_unavailable": rate_limited,
+            "llm_error": str(error) if rate_limited else state.get("llm_error", ""),
         }
 
 
 def verification_node(state: dict) -> dict:
-    """
-    Validate citations and verify whether generated claims
-    are supported by retrieved evidence.
-    """
+    """Validate citations and verify semantic support."""
+
     print("\n[Verification] Validating citations...")
 
     answer = state.get("answer", "")
     chunks = state.get("retrieved_chunks", [])
 
+    # Citation validation is local and does not require Gemini.
     citation_result = validate_citations(answer, chunks)
 
     print("[Verification] Checking semantic support...")
@@ -405,25 +410,32 @@ def verification_node(state: dict) -> dict:
             and semantic_passed
         )
 
+        return {
+            "citation_validation": citation_result,
+            "semantic_verification": semantic_result,
+            "verification_passed": verification_passed,
+            "errors": errors,
+        }
+
     except APIError as error:
         message = f"Semantic verification API error: {error}"
         print(f"\n[Verification] {message}")
 
         errors.append(message)
 
-        semantic_result = {
-            "claims": [],
-            "error": message,
+        rate_limited = is_rate_limit_error(error)
+
+        return {
+            "citation_validation": citation_result,
+            "semantic_verification": {
+                "claims": [],
+                "error": message,
+            },
+            "verification_passed": False,
+            "llm_unavailable": rate_limited,
+            "llm_error": str(error) if rate_limited else state.get("llm_error", ""),
+            "errors": errors,
         }
-
-        verification_passed = False
-
-    return {
-        "citation_validation": citation_result,
-        "semantic_verification": semantic_result,
-        "verification_passed": verification_passed,
-        "errors": errors,
-    }
 
 
 

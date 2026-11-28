@@ -18,15 +18,14 @@ MAX_RETRIEVAL_ATTEMPTS = 2
 
 
 def should_continue_retrieval(state: ResearchState) -> str:
-    """
-    Decide whether another retrieval attempt is necessary.
-    """
+    """Decide whether to refine retrieval or stop."""
 
-    # Never loop on evaluator API failures.
+    if state.get("llm_unavailable", False):
+        return "finish"
+
     if state.get("evidence_evaluation_failed", False):
         return "generate"
 
-    # Evidence is sufficient.
     if state.get("evidence_sufficient", False):
         return "generate"
 
@@ -45,6 +44,9 @@ def should_continue_retrieval(state: ResearchState) -> str:
 
 
 def should_revise(state: ResearchState) -> str:
+
+    if state.get("llm_unavailable", False):
+        return "finish"
 
     errors = state.get("errors", [])
 
@@ -128,12 +130,13 @@ def build_research_graph():
 
     # Answer generation
     workflow.add_conditional_edges(
-        "generation",
-        after_generation,
-        {
-            "verify": "verification",
-            "finish": "final_report",
-        },
+    "evidence_evaluation",
+    should_continue_retrieval,
+    {
+        "refine": "query_refinement",
+        "generate": "generation",
+        "finish": "final_report",
+    },
     )
 
     # Answer verification and revision

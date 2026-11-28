@@ -32,6 +32,8 @@ class ResearchState(TypedDict):
 
     # Error handling
     errors: NotRequired[list[str]]
+    llm_unavailable: NotRequired[bool]
+    llm_error: NotRequired[str]
 
     # Final output
     final_report: NotRequired[str]
