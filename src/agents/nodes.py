@@ -4,6 +4,7 @@ from src.retrieval.hybrid_search import HybridSearch
 from src.retrieval.reranker import NeuralReranker
 from src.verification.evidence_sufficiency import evaluate_evidence
 from src.agents.api_errors import is_rate_limit_error
+from src.compression.context_compressor import compress_context
 
 
 from google.genai.errors import APIError
@@ -352,18 +353,57 @@ def query_refinement_node(state: dict) -> dict:
     }
 
 
+
 def generation_node(state: dict) -> dict:
-    """Generate an evidence-grounded answer using Gemini."""
+    """Compress research context before generating an answer."""
+
+    print("\n[Generation] Compressing research context...")
+
+    original_chunks = state.get("retrieved_chunks", [])
+
+    compression_result = compress_context(
+        question=state["question"],
+        chunks=original_chunks,
+        max_tokens=1800,
+    )
+
+    compressed_chunks = compression_result["chunks"]
+    stats = {
+        key: value
+        for key, value in compression_result.items()
+        if key != "chunks"
+    }
+
+    print(
+        f"[Compression] Original tokens: "
+        f"{stats['original_tokens']}"
+    )
+    print(
+        f"[Compression] Compressed tokens: "
+        f"{stats['compressed_tokens']}"
+    )
+    print(
+        f"[Compression] Tokens saved: "
+        f"{stats['tokens_saved']}"
+    )
+    print(
+        f"[Compression] Reduction: "
+        f"{stats['compression_ratio']:.1%}"
+    )
 
     print("\n[Generation] Generating research answer...")
 
     try:
         answer = generate_answer(
             question=state["question"],
-            chunks=state.get("retrieved_chunks", []),
+            chunks=compressed_chunks,
         )
 
-        return {"answer": answer}
+        return {
+            "answer": answer,
+            "compressed_chunks": compressed_chunks,
+            "compression_stats": stats,
+        }
 
     except APIError as error:
         message = f"Gemini API error: {error}"
@@ -376,10 +416,16 @@ def generation_node(state: dict) -> dict:
 
         return {
             "answer": "",
+            "compressed_chunks": compressed_chunks,
+            "compression_stats": stats,
             "errors": errors,
             "llm_unavailable": rate_limited,
-            "llm_error": str(error) if rate_limited else state.get("llm_error", ""),
+            "llm_error": (
+                str(error) if rate_limited
+                else state.get("llm_error", "")
+            ),
         }
+
 
 
 def verification_node(state: dict) -> dict:
@@ -520,6 +566,21 @@ def final_report_node(state: dict) -> dict:
         f"Status: {status}\n\n"
         f"{report_content}\n"
     )
+
+    compression_stats = state.get("compression_stats", {})
+
+    if compression_stats:
+        report_content += (
+            "\n\nCONTEXT COMPRESSION\n"
+            f"Original tokens (estimated): "
+            f"{compression_stats['original_tokens']}\n"
+            f"Compressed tokens (estimated): "
+            f"{compression_stats['compressed_tokens']}\n"
+            f"Tokens saved (estimated): "
+            f"{compression_stats['tokens_saved']}\n"
+            f"Context reduction: "
+            f"{compression_stats['compression_ratio']:.1%}\n"
+        )
 
     if llm_unavailable:
         final_report += (

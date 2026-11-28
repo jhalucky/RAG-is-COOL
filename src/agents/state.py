@@ -24,6 +24,10 @@ class ResearchState(TypedDict):
     # Generation
     answer: NotRequired[str]
 
+    #compression
+    compressed_chunks: NotRequired[list[dict[str, Any]]]
+    compression_stats: NotRequired[dict[str, Any]]
+
     # Verification
     citation_validation: NotRequired[dict[str, Any]]
     semantic_verification: NotRequired[dict[str, Any]]
