@@ -20,6 +20,7 @@ class ResearchState(TypedDict):
     evidence_evaluation: NotRequired[dict[str, Any]]
     evidence_sufficient: NotRequired[bool]
     evidence_evaluation_failed: NotRequired[bool]
+    evidence_selection_stats: NotRequired[dict[str, Any]]
 
     # Generation
     answer: NotRequired[str]

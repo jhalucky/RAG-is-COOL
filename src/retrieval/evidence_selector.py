@@ -44,8 +44,8 @@ def select_diverse_evidence(
         question: str,
         subquestions: list[str],
         chunks: list[dict[str, Any]],
-        max_chunks: int = 0,
-        max_per_document: int = 2_
+        max_chunks: int = 8,
+        max_per_document: int = 2
 ) -> dict[str, Any]:
 
     if max_chunks < 1:
@@ -56,10 +56,10 @@ def select_diverse_evidence(
 
     if not chunks:
         return {
-            "chunks": {},
+            "chunks": [],
             "source_count": 0,
             "subquestions_covered": [],
-            "subquestions_coverage": 0.0
+            "subquestion_coverage": 0.0
         }
 
     research_questions = [

@@ -5,6 +5,7 @@ from src.retrieval.reranker import NeuralReranker
 from src.verification.evidence_sufficiency import evaluate_evidence
 from src.agents.api_errors import is_rate_limit_error
 from src.compression.context_compressor import compress_context
+from src.retrieval.evidence_selector import select_diverse_evidence
 
 
 from google.genai.errors import APIError
@@ -171,10 +172,11 @@ Research question:
 
 
 
+
 def retrieval_node(state: dict) -> dict:
     """
-    Perform multi-query retrieval and preserve evidence
-    collected across adaptive retrieval attempts.
+    Perform multi-query retrieval, preserve evidence across adaptive
+    retrieval attempts, and select diverse evidence.
     """
 
     question = state["question"]
@@ -188,7 +190,7 @@ def retrieval_node(state: dict) -> dict:
     print("\n[Retrieval] Starting retrieval...")
     print(f"[Retrieval] Queries: {len(queries)}")
 
-    # Preserve evidence from previous attempts.
+    # Preserve evidence from previous adaptive retrieval attempts.
     all_candidates = {}
 
     for chunk in state.get("retrieved_chunks", []):
@@ -201,7 +203,6 @@ def retrieval_node(state: dict) -> dict:
 
     # Retrieve evidence for each query.
     for index, query in enumerate(queries, start=1):
-
         print(f"\n[Retrieval] Query {index}/{len(queries)}")
         print(query)
 
@@ -233,21 +234,58 @@ def retrieval_node(state: dict) -> dict:
 
     if not merged_candidates:
         retrieved_chunks = []
+        selection = {
+            "source_count": 0,
+            "subquestions_covered": [],
+            "subquestion_coverage": 0.0,
+        }
+
     else:
-        retrieved_chunks = reranker.rerank(
+        # First, rank all collected candidates using the cross-encoder.
+        reranked_chunks = reranker.rerank(
             query=question,
             candidates=merged_candidates,
-            top_k=5,
+            top_k=len(merged_candidates),
         )
+
+        print(
+            f"[Retrieval] Reranked candidates: "
+            f"{len(reranked_chunks)}"
+        )
+
+        # Then balance relevance, source diversity and research coverage.
+        selection = select_diverse_evidence(
+            question=question,
+            subquestions=state.get("research_plan", []),
+            chunks=reranked_chunks,
+            max_chunks=8,
+            max_per_document=2,
+        )
+
+        retrieved_chunks = selection["chunks"]
 
     attempt = state.get("retrieval_attempts", 0) + 1
 
-    print(f"[Retrieval] Attempt: {attempt}")
+    print("\n[Evidence Selection]")
+    print(f"Selected passages: {len(retrieved_chunks)}")
+    print(f"Distinct sources: {selection['source_count']}")
+    print(
+        f"Subquestion coverage: "
+        f"{selection['subquestion_coverage']:.1%}"
+    )
+
+    print(f"\n[Retrieval] Attempt: {attempt}")
 
     return {
         "retrieved_chunks": retrieved_chunks,
         "retrieval_attempts": attempt,
+        "evidence_selection_stats": {
+            "source_count": selection["source_count"],
+            "subquestions_covered": selection["subquestions_covered"],
+            "subquestion_coverage": selection["subquestion_coverage"],
+        },
     }
+
 
 
 
