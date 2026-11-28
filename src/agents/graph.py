@@ -145,6 +145,16 @@ def build_research_graph():
     },
     )
 
+    # Answer generation
+    workflow.add_conditional_edges(
+        "generation",
+        after_generation,
+        {
+            "verify": "verification",
+            "finish": "final_report",
+        },
+    )
+
     # Answer verification and revision
     workflow.add_conditional_edges(
         "verification",
