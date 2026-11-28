@@ -146,21 +146,26 @@ Research question:
         print(f"[Planner] Generated {len(research_plan)} research subquestions.")
 
     except Exception as error:
-        message = f"LLM planning failed; using fallback plan: {error}"
+        message = f"LLM planning failed: {error}"
         print(f"[Planner] {message}")
 
         errors.append(message)
+
+        if is_rate_limit_error(error):
+            print(
+                "[Planner] Gemini quota exhausted. "
+                "Continuing with fallback planning, "
+                "but disabling further LLM requests."
+            )
+
+            return {
+                "research_plan": fallback_plan,
+                "llm_unavailable": True,
+                "llm_error": str(error),
+                "errors": errors,
+            }
+
         research_plan = fallback_plan
-
-    print("\nResearch Plan:")
-    for index, subquestion in enumerate(research_plan, start=1):
-        print(f"{index}. {subquestion}")
-
-    return {
-        "research_plan": research_plan,
-        "revision_count": state.get("revision_count", 0),
-        "errors": errors,
-    }
 
 
 
@@ -439,38 +444,50 @@ def verification_node(state: dict) -> dict:
 
 
 
+
 def final_report_node(state: dict) -> dict:
-    """
-    Prepare the final research report, including failure status.
-    """
+    """Generate a report while preserving partial research results."""
+
     answer = state.get("answer", "")
     errors = state.get("errors", [])
-
-    if not answer:
-        status = "Generation Failed"
-        report_content = (
-            "An answer could not be generated because the LLM "
-            "service was unavailable.\n\n"
-            f"Retrieved evidence passages: "
-            f"{len(state.get('retrieved_chunks', []))}\n\n"
-            "Please retry the research request later."
-        )
-    else:
-        status = (
-            "Verified"
-            if state.get("verification_passed", False)
-            else "Verification requires review"
-        )
-        report_content = answer
-
-
+    chunks = state.get("retrieved_chunks", [])
     evaluation = state.get("evidence_evaluation", {})
 
+    llm_unavailable = state.get("llm_unavailable", False)
+
+    # Determine report status.
+    if llm_unavailable:
+        if answer:
+            status = "Verification incomplete — LLM quota exhausted"
+        else:
+            status = "LLM quota exhausted — partial research preserved"
+
+    elif not answer:
+        status = "Generation Failed"
+
+    elif state.get("verification_passed", False):
+        status = "Verified"
+
+    else:
+        status = "Verification requires review"
+
+    report_content = answer
+
+    if not answer:
+        report_content = (
+            "The research workflow could not complete answer "
+            "generation because the LLM service was unavailable.\n\n"
+            f"Retrieved evidence passages: {len(chunks)}\n"
+        )
+
+    # Preserve evidence evaluation details.
     if evaluation:
         report_content += (
             "\n\nEVIDENCE EVALUATION\n"
-            f"Coverage score: {evaluation.get('coverage_score', 0):.2f}\n"
-            f"Evidence sufficient: {evaluation.get('sufficient', False)}\n"
+            f"Coverage score: "
+            f"{evaluation.get('coverage_score', 0):.2f}\n"
+            f"Evidence sufficient: "
+            f"{evaluation.get('sufficient', False)}\n"
             f"Reasoning: {evaluation.get('reasoning', '')}\n"
         )
 
@@ -482,18 +499,43 @@ def final_report_node(state: dict) -> dict:
                 f"- {aspect}" for aspect in missing
             )
 
+    # Preserve retrieved passages and their source metadata.
+    if not answer and chunks:
+        report_content += "\n\nRETRIEVED EVIDENCE\n"
+
+        for index, chunk in enumerate(chunks[:5], start=1):
+            document = chunk.get("document_name", "Unknown")
+            page = chunk.get("page_number", "Unknown")
+            passage = chunk.get("text", "")
+
+            report_content += (
+                f"\n[{index}] {document}, page {page}\n"
+                f"{passage[:1200]}\n"
+            )
+
     final_report = (
-        f"RESEARCH REPORT\n"
+        "RESEARCH REPORT\n"
         f"{'=' * 60}\n\n"
         f"Question: {state['question']}\n\n"
         f"Status: {status}\n\n"
         f"{report_content}\n"
     )
 
+    if llm_unavailable:
+        final_report += (
+            "\n\nLLM SERVICE STATUS\n"
+            "Further LLM requests were stopped because "
+            "the API quota or rate limit was reached.\n"
+            "Retrieved evidence has been preserved.\n"
+        )
+
+        llm_error = state.get("llm_error", "")
+
+        if llm_error:
+            final_report += f"\nAPI error: {llm_error[:1200]}\n"
+
     if errors:
         final_report += "\nErrors:\n"
         final_report += "\n".join(errors)
 
-    return {
-        "final_report": final_report,
-    }
+    return {"final_report": final_report}

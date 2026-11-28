@@ -41,3 +41,17 @@ def test_evaluator_failure_does_not_trigger_retry():
     }
 
     assert should_continue_retrieval(state) == "generate"
+
+from src.agents.graph import after_retrieval
+
+
+def test_retrieval_skips_evaluation_when_quota_exhausted():
+    state = {"llm_unavailable": True}
+
+    assert after_retrieval(state) == "finish"
+
+
+def test_retrieval_evaluates_when_llm_available():
+    state = {"llm_unavailable": False}
+
+    assert after_retrieval(state) == "evaluate"

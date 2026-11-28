@@ -43,6 +43,15 @@ def should_continue_retrieval(state: ResearchState) -> str:
     return "generate"
 
 
+def after_retrieval(state: ResearchState) -> str:
+    """Skip Gemini evaluation if the quota is exhausted."""
+
+    if state.get("llm_unavailable", False):
+        return "finish"
+
+    return "evaluate"
+
+
 def should_revise(state: ResearchState) -> str:
 
     if state.get("llm_unavailable", False):
@@ -115,17 +124,14 @@ def build_research_graph():
     workflow.add_edge("planner", "retrieval")
 
     # Adaptive retrieval
-    workflow.add_edge("retrieval", "evidence_evaluation")
-
     workflow.add_conditional_edges(
-        "evidence_evaluation",
-        should_continue_retrieval,
-        {
-            "refine": "query_refinement",
-            "generate": "generation",
-        },
-    )
-
+    "retrieval",
+    after_retrieval,
+    {
+        "evaluate": "evidence_evaluation",
+        "finish": "final_report",
+    },
+)
     workflow.add_edge("query_refinement", "retrieval")
 
     # Answer generation
